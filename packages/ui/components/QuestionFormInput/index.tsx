@@ -1,6 +1,7 @@
 "use client";
 
 import { useAutoAnimate } from "@formkit/auto-animate/react";
+import DOMPurify from "dompurify";
 import { debounce } from "lodash";
 import { ImagePlusIcon, PencilIcon, TrashIcon } from "lucide-react";
 import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +30,7 @@ import {
   TSurveyRedirectUrlCard,
 } from "@formbricks/types/surveys/types";
 import { LanguageIndicator } from "../../../ee/multi-language/components/language-indicator";
+import { LocalizedEditor } from "../../../ee/multi-language/components/localized-editor";
 import { createI18nString } from "../../../lib/i18n/utils";
 import { FileInput } from "../FileInput";
 import { Input } from "../Input";
@@ -96,6 +98,9 @@ export const QuestionFormInput = ({
   const isEndingCard = questionIdx >= localSurvey.questions.length;
   const isWelcomeCard = questionIdx === -1;
   const index = getIndex(id, isChoice || isMatrixLabelColumn || isMatrixLabelRow);
+  const isHeadlineOrSubheader = id === "headline" || id === "subheader";
+  const [showEditor, setShowEditor] = useState(false);
+  const [firstRender, setFirstRender] = useState(true);
 
   const questionId = useMemo(() => {
     return isWelcomeCard
@@ -274,7 +279,7 @@ export const QuestionFormInput = ({
   const checkForRecallSymbol = useCallback(
     (value: TI18nString) => {
       const pattern = /(^|\s)@(\s|$)/;
-      if (pattern.test(getLocalizedValue(value, usedLanguageCode))) {
+      if (pattern.test(stripHtmlTags(getLocalizedValue(value, usedLanguageCode)))) {
         setShowRecallItemSelect(true);
       } else {
         setShowRecallItemSelect(false);
@@ -338,7 +343,6 @@ export const QuestionFormInput = ({
   const handleUpdate = useCallback(
     (updatedText: string) => {
       const translatedText = createUpdatedText(updatedText);
-
       if (isChoice) {
         updateChoiceDetails(translatedText);
       } else if (isEndingCard || isWelcomeCard) {
@@ -362,6 +366,17 @@ export const QuestionFormInput = ({
       updateSurveyDetails,
     ]
   );
+
+  const replaceInHtmlContent = (html: string, pattern: RegExp | string, replacementPattern: string) => {
+    const rawText = stripHtmlTags(html);
+    const updatedText = rawText.replace(pattern, replacementPattern);
+    return html.replace(rawText, updatedText);
+  };
+
+  const stripHtmlTags = (html: string): string => {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return doc.body.textContent || "";
+  };
 
   // Adds a new recall question to the recallItems array, updates fallbacks, modifies the text with recall details.
   const addRecallItem = useCallback(
@@ -389,13 +404,16 @@ export const QuestionFormInput = ({
       setShowRecallItemSelect(false);
 
       let modifiedHeadlineWithId = { ...elementText };
-      modifiedHeadlineWithId[usedLanguageCode] = getLocalizedValue(
-        modifiedHeadlineWithId,
-        usedLanguageCode
-      ).replace(/(?<=^|\s)@(?=\s|$)/g, `#recall:${recallItem.id}/fallback:# `);
-
+      // modifiedHeadlineWithId[usedLanguageCode] = getLocalizedValue(
+      //   modifiedHeadlineWithId,
+      //   usedLanguageCode
+      // ).replace(/(?<=^|\s)@(?=\s|$)/g, `#recall:${recallItem.id}/fallback:# `);
+      modifiedHeadlineWithId[usedLanguageCode] = replaceInHtmlContent(
+        getLocalizedValue(modifiedHeadlineWithId, usedLanguageCode),
+        /(?<=^|\s)@(?=\s|$)/g,
+        `#recall:${recallItem.id}/fallback:# `
+      );
       handleUpdate(getLocalizedValue(modifiedHeadlineWithId, usedLanguageCode));
-
       const modifiedHeadlineWithName = recallToHeadline(
         modifiedHeadlineWithId,
         localSurvey,
@@ -403,7 +421,6 @@ export const QuestionFormInput = ({
         usedLanguageCode,
         attributeClasses
       );
-
       setText(modifiedHeadlineWithName);
       setShowFallbackInput(true);
     },
@@ -448,10 +465,15 @@ export const QuestionFormInput = ({
           let updatedFallback = { ...fallbacks };
           updatedFallback[recallQuestion.id] = fallBackValue;
           setFallbacks(updatedFallback);
-          headlineWithFallback[usedLanguageCode] = getLocalizedValue(
-            headlineWithFallback,
-            usedLanguageCode
-          ).replace(recallInfo, `#recall:${recallQuestion?.id}/fallback:${fallBackValue}#`);
+          // headlineWithFallback[usedLanguageCode] = getLocalizedValue(
+          //   headlineWithFallback,
+          //   usedLanguageCode
+          // ).replace(recallInfo, `#recall:${recallQuestion?.id}/fallback:${fallBackValue}#`);
+          headlineWithFallback[usedLanguageCode] = replaceInHtmlContent(
+            getLocalizedValue(headlineWithFallback, usedLanguageCode),
+            recallInfo,
+            `#recall:${recallQuestion?.id}/fallback:${fallBackValue}#`
+          );
           handleUpdate(getLocalizedValue(headlineWithFallback, usedLanguageCode));
         }
       }
@@ -480,6 +502,21 @@ export const QuestionFormInput = ({
     () => debounce((value) => handleUpdate(headlineToRecall(value, recallItems, fallbacks)), 100),
     [handleUpdate, recallItems, fallbacks]
   );
+
+  useEffect(() => {
+    if (showEditor) {
+      const valueToUse = value || {}; // Default to an empty object if value is undefined
+      const valueTI18nString = recallToHeadline(
+        valueToUse,
+        localSurvey,
+        false,
+        usedLanguageCode,
+        attributeClasses
+      );
+      // Process initial value if showEditor is true
+      checkForRecallSymbol(valueTI18nString);
+    }
+  }, [showEditor, value]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -540,16 +577,20 @@ export const QuestionFormInput = ({
           )}
           <div className="flex items-center space-x-2">
             <div className="group relative w-full">
-              <div className="h-10 w-full"></div>
-              <div
-                id="wrapper"
-                ref={highlightContainerRef}
-                className={`no-scrollbar absolute top-0 z-0 mt-0.5 flex h-10 w-full overflow-scroll whitespace-nowrap px-3 py-2 text-center text-sm text-transparent ${
-                  localSurvey.languages?.length > 1 ? "pr-24" : ""
-                }`}
-                dir="auto">
-                {renderedText}
-              </div>
+              {!showEditor && (
+                <>
+                  <div className="h-10 w-full"></div>
+                  <div
+                    id="wrapper"
+                    ref={highlightContainerRef}
+                    className={`no-scrollbar absolute top-0 z-0 mt-0.5 flex h-10 w-full overflow-scroll whitespace-nowrap px-3 py-2 text-center text-sm text-transparent ${
+                      localSurvey.languages?.length > 1 ? "pr-24" : ""
+                    }`}
+                    dir="auto">
+                    {renderedText}
+                  </div>
+                </>
+              )}
               {getLocalizedValue(elementText, usedLanguageCode).includes("recall:") && (
                 <button
                   className="fixed right-14 hidden items-center rounded-b-lg bg-slate-100 px-2.5 py-1 text-xs hover:bg-slate-200 group-hover:flex"
@@ -561,33 +602,85 @@ export const QuestionFormInput = ({
                   <PencilIcon className="ml-2 h-3 w-3" />
                 </button>
               )}
-              <Input
-                key={`${questionId}-${id}-${usedLanguageCode}`}
-                dir="auto"
-                className={`absolute top-0 text-black caret-black ${
-                  localSurvey.languages?.length > 1 ? "pr-24" : ""
-                } ${className}`}
-                placeholder={placeholder ? placeholder : getPlaceHolderById(id)}
-                id={id}
-                name={id}
-                aria-label={label}
-                autoComplete={showRecallItemSelect ? "off" : "on"}
-                value={
-                  recallToHeadline(text, localSurvey, false, usedLanguageCode, attributeClasses)[
-                    usedLanguageCode
-                  ]
-                }
-                onChange={handleInputChange}
-                ref={inputRef}
-                onBlur={onBlur}
-                maxLength={maxLength ?? undefined}
-                isInvalid={
-                  isInvalid &&
-                  text[usedLanguageCode]?.trim() === "" &&
-                  localSurvey.languages?.length > 1 &&
-                  isTranslationIncomplete
-                }
-              />
+
+              {!isHeadlineOrSubheader ? (
+                <Input
+                  key={`${questionId}-${id}-${usedLanguageCode}`}
+                  dir="auto"
+                  className={`absolute top-0 text-black caret-black ${
+                    localSurvey.languages?.length > 1 ? "pr-24" : ""
+                  } ${className}`}
+                  placeholder={placeholder ? placeholder : getPlaceHolderById(id)}
+                  id={id}
+                  name={id}
+                  aria-label={label}
+                  autoComplete={showRecallItemSelect ? "off" : "on"}
+                  value={
+                    recallToHeadline(text, localSurvey, false, usedLanguageCode, attributeClasses)[
+                      usedLanguageCode
+                    ]
+                  }
+                  onChange={handleInputChange}
+                  ref={inputRef}
+                  onBlur={onBlur}
+                  maxLength={maxLength ?? undefined}
+                  isInvalid={
+                    isInvalid &&
+                    text[usedLanguageCode]?.trim() === "" &&
+                    localSurvey.languages?.length > 1 &&
+                    isTranslationIncomplete
+                  }
+                />
+              ) : (
+                <>
+                  {isHeadlineOrSubheader && !showEditor ? (
+                    <Input
+                      key={`${questionId}-${id}-${usedLanguageCode}`}
+                      dir="auto"
+                      className={`absolute top-0 text-black caret-black ${
+                        localSurvey.languages?.length > 1 ? "pr-24" : ""
+                      } ${className}`}
+                      placeholder={placeholder ? placeholder : getPlaceHolderById(id)}
+                      id={id}
+                      name={id}
+                      aria-label={label}
+                      onClick={() => setShowEditor(true)}
+                      autoComplete={showRecallItemSelect ? "off" : "on"}
+                      value={stripHtmlTags(
+                        recallToHeadline(text, localSurvey, false, usedLanguageCode, attributeClasses)[
+                          usedLanguageCode
+                        ]
+                      )}
+                      onChange={handleInputChange}
+                      ref={inputRef}
+                      onBlur={onBlur}
+                      maxLength={maxLength ?? undefined}
+                      isInvalid={
+                        isInvalid &&
+                        text[usedLanguageCode]?.trim() === "" &&
+                        localSurvey.languages?.length > 1 &&
+                        isTranslationIncomplete
+                      }
+                    />
+                  ) : (
+                    <LocalizedEditor
+                      id={id}
+                      value={value}
+                      localSurvey={localSurvey}
+                      isInvalid={isInvalid}
+                      updateQuestion={updateQuestion}
+                      selectedLanguageCode={selectedLanguageCode}
+                      setSelectedLanguageCode={setSelectedLanguageCode}
+                      firstRender={firstRender}
+                      setFirstRender={setFirstRender}
+                      questionIdx={questionIdx}
+                      showRecallItemSelect={showRecallItemSelect}
+                      stripHtmlTags={stripHtmlTags}
+                    />
+                  )}
+                </>
+              )}
+
               {enabledLanguages.length > 1 && (
                 <LanguageIndicator
                   selectedLanguageCode={usedLanguageCode}
@@ -634,13 +727,21 @@ export const QuestionFormInput = ({
             selectedLanguageCode={usedLanguageCode}
             hiddenFields={localSurvey.hiddenFields}
             attributeClasses={attributeClasses}
+            stripHtmlTags={stripHtmlTags}
           />
         )}
       </div>
+
       {usedLanguageCode !== "default" && value && typeof value["default"] !== undefined && (
         <div className="mt-1 text-xs text-gray-500">
           <strong>Translate:</strong>{" "}
-          {recallToHeadline(value, localSurvey, false, "default", attributeClasses)["default"]}
+          <label
+            dangerouslySetInnerHTML={{
+              __html: DOMPurify.sanitize(
+                recallToHeadline(value, localSurvey, false, "default", attributeClasses)["default"]
+              ),
+            }}
+          />
         </div>
       )}
       {usedLanguageCode === "default" && localSurvey.languages?.length > 1 && isTranslationIncomplete && (

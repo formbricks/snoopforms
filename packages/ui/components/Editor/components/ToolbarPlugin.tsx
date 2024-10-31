@@ -24,7 +24,7 @@ import {
   SELECTION_CHANGE_COMMAND,
 } from "lexical";
 import { COMMAND_PRIORITY_CRITICAL, PASTE_COMMAND } from "lexical";
-import { Bold, ChevronDownIcon, Italic, Link } from "lucide-react";
+import { Bold, ChevronDownIcon, Italic, Link, Underline } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@formbricks/lib/cn";
@@ -230,6 +230,7 @@ export const ToolbarPlugin = (props: TextEditorProps) => {
   const [isLink, setIsLink] = useState(false);
   const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
+  const [isUnderline, setIsUnderline] = useState(false);
 
   // save ref to setText to use it in event listeners safely
   const setText = useRef<any>(props.setText);
@@ -329,6 +330,7 @@ export const ToolbarPlugin = (props: TextEditorProps) => {
       }
       setIsBold(selection.hasFormat("bold"));
       setIsItalic(selection.hasFormat("italic"));
+      setIsUnderline(selection.hasFormat("underline")); // Check for underline formatting
 
       const node = getSelectedNode(selection);
       const parent = node.getParent();
@@ -358,15 +360,22 @@ export const ToolbarPlugin = (props: TextEditorProps) => {
         const root = $getRoot();
         if (root) {
           editor.update(() => {
+            const textContent = props.getText();
             const parser = new DOMParser();
             // Create a new TextNode
             const dom = parser.parseFromString(props.getText(), "text/html");
 
-            const nodes = $generateNodesFromDOM(editor, dom);
-            const paragraph = $createParagraphNode();
-            root.clear().append(paragraph);
-            paragraph.select();
-            $insertNodes(nodes);
+            // Only insert nodes if there's content to avoid adding <p><br></p>
+            if (textContent.trim()) {
+              const nodes = $generateNodesFromDOM(editor, dom);
+              root.clear();
+              $insertNodes(nodes);
+            } else {
+              // Optionally, add an empty paragraph node instead of <br> if required
+              const paragraph = $createParagraphNode();
+              root.clear().append(paragraph);
+              paragraph.select();
+            }
           });
         }
       });
@@ -378,17 +387,20 @@ export const ToolbarPlugin = (props: TextEditorProps) => {
     if (props.setFirstRender && props.firstRender) {
       props.setFirstRender(false);
       editor.update(() => {
-        const parser = new DOMParser();
-        const dom = parser.parseFromString(props.getText(), "text/html");
+        const textContent = props.getText().trim();
 
-        const nodes = $generateNodesFromDOM(editor, dom);
-        const paragraph = $createParagraphNode();
-        $getRoot().clear().append(paragraph);
+        if (textContent) {
+          const parser = new DOMParser();
+          const dom = parser.parseFromString(textContent, "text/html");
+          const nodes = $generateNodesFromDOM(editor, dom);
 
-        paragraph.select();
-
-        $getRoot().select();
-        $insertNodes(nodes);
+          const root = $getRoot();
+          root.clear();
+          $insertNodes(nodes);
+        } else {
+          // Clear root if no content to avoid <p><br></p>
+          $getRoot().clear();
+        }
 
         editor.registerUpdateListener(({ editorState, prevEditorState }) => {
           editorState.read(() => {
@@ -501,6 +513,18 @@ export const ToolbarPlugin = (props: TextEditorProps) => {
                 editor.dispatchCommand(FORMAT_TEXT_COMMAND, "bold");
               }}
               className={isBold ? "bg-subtle active-button" : "inactive-button"}
+            />
+          )}
+          {!props.excludedToolbarItems?.includes("underline") && (
+            <Button
+              color="minimal"
+              variant="minimal"
+              type="button"
+              StartIcon={Underline}
+              onClick={() => {
+                editor.dispatchCommand(FORMAT_TEXT_COMMAND, "underline");
+              }}
+              className={isUnderline ? "bg-subtle active-button" : "inactive-button"}
             />
           )}
           {!props.excludedToolbarItems?.includes("italic") && (
