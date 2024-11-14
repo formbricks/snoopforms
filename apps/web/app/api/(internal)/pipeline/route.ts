@@ -9,6 +9,7 @@ import { getAttributes } from "@formbricks/lib/attribute/service";
 import { cache } from "@formbricks/lib/cache";
 import { CRON_SECRET, IS_AI_CONFIGURED } from "@formbricks/lib/constants";
 import { getIntegrations } from "@formbricks/lib/integration/service";
+import { writeDataToMattermost } from "@formbricks/lib/mattermost/service";
 import { getOrganizationByEnvironmentId } from "@formbricks/lib/organization/service";
 import { getResponseCountBySurveyId } from "@formbricks/lib/response/service";
 import { getSurvey, updateSurvey } from "@formbricks/lib/survey/service";
@@ -18,7 +19,7 @@ import { parseRecallInfo } from "@formbricks/lib/utils/recall";
 import { webhookCache } from "@formbricks/lib/webhook/cache";
 import { TPipelineTrigger, ZPipelineInput } from "@formbricks/types/pipelines";
 import { TWebhook } from "@formbricks/types/webhooks";
-import { handleIntegrations } from "./lib/handleIntegrations";
+import { extractResponses, handleIntegrations } from "./lib/handleIntegrations";
 
 export const POST = async (request: Request) => {
   // Check authentication
@@ -42,6 +43,14 @@ export const POST = async (request: Request) => {
 
   const { environmentId, surveyId, event, response } = inputValidation.data;
 
+  // fetch survey info
+  const survey = await getSurvey(surveyId);
+
+  if (!survey) {
+    console.error(`Survey with id ${surveyId} not found`);
+    return new Response("Survey not found", { status: 404 });
+  }
+
   // Fetch webhooks
   const getWebhooksForPipeline = cache(
     async (environmentId: string, event: TPipelineTrigger, surveyId: string) => {
@@ -62,6 +71,34 @@ export const POST = async (request: Request) => {
   const webhooks: TWebhook[] = await getWebhooksForPipeline(environmentId, event, surveyId);
   // Prepare webhook and email promises
 
+  const nonMattermostWebhooks = webhooks.filter((webhook) => {
+    if (webhook.meta) {
+      let meta;
+      try {
+        meta = JSON.parse(webhook.meta as string);
+      } catch (e) {
+        console.error(`Invalid JSON in webhook.meta for webhook ${webhook.id}:`, e);
+        return true; // Default to non-Mattermost webhook
+      }
+      return meta?.webhook_type !== "mattermost";
+    }
+    return true;
+  });
+
+  const mattermostWebhooks = webhooks.filter((webhook) => {
+    if (webhook.meta) {
+      let meta;
+      try {
+        meta = JSON.parse(webhook.meta as string);
+      } catch (e) {
+        console.error(`Invalid JSON in webhook.meta for webhook ${webhook.id}:`, e);
+        return false; // Exclude from Mattermost webhooks
+      }
+      return meta?.webhook_type === "mattermost";
+    }
+    return false;
+  });
+
   // Fetch with timeout of 5 seconds to prevent hanging
   const fetchWithTimeout = (url: string, options: RequestInit, timeout: number = 5000): Promise<Response> => {
     return Promise.race([
@@ -70,13 +107,14 @@ export const POST = async (request: Request) => {
     ]);
   };
 
-  const webhookPromises = webhooks.map((webhook) =>
+  const webhookPromises = nonMattermostWebhooks.map((webhook) =>
     fetchWithTimeout(webhook.url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         webhookId: webhook.id,
         event,
+        meta: webhook.meta,
         data: response,
       }),
     }).catch((error) => {
@@ -84,18 +122,23 @@ export const POST = async (request: Request) => {
     })
   );
 
+  let mattermostWebhookPromises: Promise<void>[] = [];
+
+  if (mattermostWebhooks.length > 0) {
+    const values = await extractResponses(inputValidation.data, Object.keys(response.data), survey);
+
+    mattermostWebhookPromises = mattermostWebhooks.map((webhook) =>
+      writeDataToMattermost(webhook.url, values, survey?.name, webhook.meta as string).catch((error) => {
+        console.error(`Mattermost webhook call to ${webhook.url} failed:`, error);
+      })
+    );
+  }
   if (event === "responseFinished") {
-    // Fetch integrations, survey, and responseCount in parallel
-    const [integrations, survey, responseCount] = await Promise.all([
+    // Fetch integrations, and responseCount in parallel
+    const [integrations, responseCount] = await Promise.all([
       getIntegrations(environmentId),
-      getSurvey(surveyId),
       getResponseCountBySurveyId(surveyId),
     ]);
-
-    if (!survey) {
-      console.error(`Survey with id ${surveyId} not found`);
-      return new Response("Survey not found", { status: 404 });
-    }
 
     if (integrations.length > 0) {
       await handleIntegrations(integrations, inputValidation.data, survey);
@@ -176,7 +219,11 @@ export const POST = async (request: Request) => {
     }
 
     // Await webhook and email promises with allSettled to prevent early rejection
-    const results = await Promise.allSettled([...webhookPromises, ...emailPromises]);
+    const results = await Promise.allSettled([
+      ...webhookPromises,
+      ...emailPromises,
+      ...mattermostWebhookPromises,
+    ]);
     results.forEach((result) => {
       if (result.status === "rejected") {
         console.error("Promise rejected:", result.reason);

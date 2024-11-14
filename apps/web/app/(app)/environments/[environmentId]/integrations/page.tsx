@@ -2,6 +2,7 @@ import AirtableLogo from "@/images/airtableLogo.svg";
 import GoogleSheetsLogo from "@/images/googleSheetsLogo.png";
 import JsLogo from "@/images/jslogo.png";
 import MakeLogo from "@/images/make-small.png";
+import MattermostLogo from "@/images/mattermostLogo.svg";
 import n8nLogo from "@/images/n8n.png";
 import notionLogo from "@/images/notion.png";
 import SlackLogo from "@/images/slacklogo.png";
@@ -16,6 +17,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@formbricks/lib/authOptions";
 import { getEnvironment } from "@formbricks/lib/environment/service";
 import { getIntegrations } from "@formbricks/lib/integration/service";
+import { getMattermostWebhookCount } from "@formbricks/lib/mattermost/service";
 import { getMembershipByUserIdOrganizationId } from "@formbricks/lib/membership/service";
 import { getAccessFlags } from "@formbricks/lib/membership/utils";
 import { getOrganizationByEnvironmentId } from "@formbricks/lib/organization/service";
@@ -37,6 +39,7 @@ const Page = async ({ params }) => {
     zapierWebhookCount,
     makeWebhookCount,
     n8nwebhookCount,
+    mattermostWebhookCount,
   ] = await Promise.all([
     getEnvironment(environmentId),
     getIntegrations(environmentId),
@@ -46,6 +49,7 @@ const Page = async ({ params }) => {
     getWebhookCountBySource(environmentId, "zapier"),
     getWebhookCountBySource(environmentId, "make"),
     getWebhookCountBySource(environmentId, "n8n"),
+    getMattermostWebhookCount(environmentId),
   ]);
 
   const isIntegrationConnected = (type: TIntegrationType) =>
@@ -214,6 +218,24 @@ const Page = async ({ params }) => {
       connected: isNotionIntegrationConnected,
       statusText: isNotionIntegrationConnected ? t("common.connected") : t("common.not_connected"),
       disabled: isReadOnly,
+    },
+    {
+      connectHref: `/environments/${params.environmentId}/integrations/webhooks`,
+      connectText: "Manage",
+      connectNewTab: false,
+      docsHref: "https://formbricks.com/docs/integrations/mattermost",
+      docsText: "Docs",
+      docsNewTab: true,
+      label: "Mattermost",
+      description: "Instantly Connect your Mattermost Workspace with Formbricks",
+      icon: <Image src={MattermostLogo} alt="Mattermost Logo" />,
+      connected: mattermostWebhookCount > 0,
+      statusText:
+        mattermostWebhookCount === 1
+          ? "1 webhook"
+          : mattermostWebhookCount === 0
+            ? "Not Connected"
+            : `${mattermostWebhookCount} webhooks`,
     },
   ];
 
