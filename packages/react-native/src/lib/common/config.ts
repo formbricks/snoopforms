@@ -1,13 +1,15 @@
 /* eslint-disable no-console -- Required for error logging */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { type Result, err, ok, wrapThrowsAsync } from "@formbricks/types/error-handlers";
-import type { TJsConfig, TJsConfigUpdateInput } from "@formbricks/types/js";
-import { RN_ASYNC_STORAGE_KEY } from "../../../js-core/src/lib/constants";
+import { wrapThrowsAsync } from "@/lib/common/utils";
+import type { TConfig, TConfigUpdateInput } from "@/types/config";
+import { type Result, err, ok } from "@/types/error";
+
+export const RN_ASYNC_STORAGE_KEY = "formbricks-react-native";
 
 export class RNConfig {
   private static instance: RNConfig | null = null;
 
-  private config: TJsConfig | null = null;
+  private config: TConfig | null = null;
 
   private constructor() {
     this.loadFromStorage()
@@ -29,7 +31,7 @@ export class RNConfig {
     return RNConfig.instance;
   }
 
-  public update(newConfig: TJsConfigUpdateInput): void {
+  public update(newConfig: TConfigUpdateInput): void {
     this.config = {
       ...this.config,
       ...newConfig,
@@ -42,24 +44,24 @@ export class RNConfig {
     void this.saveToStorage();
   }
 
-  public get(): TJsConfig {
+  public get(): TConfig {
     if (!this.config) {
       throw new Error("config is null, maybe the init function was not called?");
     }
     return this.config;
   }
 
-  public async loadFromStorage(): Promise<Result<TJsConfig>> {
+  public async loadFromStorage(): Promise<Result<TConfig>> {
     try {
       const savedConfig = await AsyncStorage.getItem(RN_ASYNC_STORAGE_KEY);
       if (savedConfig) {
-        const parsedConfig = JSON.parse(savedConfig) as TJsConfig;
+        const parsedConfig = JSON.parse(savedConfig) as TConfig;
 
         // check if the config has expired
         if (
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- need to check if expiresAt is set
-          parsedConfig.environmentState.expiresAt &&
-          new Date(parsedConfig.environmentState.expiresAt) <= new Date()
+          parsedConfig.environment.expiresAt &&
+          new Date(parsedConfig.environment.expiresAt) <= new Date()
         ) {
           return err(new Error("Config in local storage has expired"));
         }

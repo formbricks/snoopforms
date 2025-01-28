@@ -1,9 +1,14 @@
 import { resolve } from "node:path";
-import { defineConfig } from "vite";
+import { type UserConfig, defineConfig } from "vite";
 import dts from "vite-plugin-dts";
 
-const config = () => {
+const config = (): UserConfig => {
   return defineConfig({
+    resolve: {
+      alias: {
+        "@": resolve(__dirname, "src"),
+      },
+    },
     optimizeDeps: {
       exclude: ["react-native"],
     },
@@ -22,6 +27,9 @@ const config = () => {
       },
     },
     plugins: [dts({ rollupTypes: true, bundledPackages: ["@formbricks/api", "@formbricks/types"] })],
+    test: {
+      setupFiles: ["./vitest.setup.ts"],
+    },
   });
 };
 

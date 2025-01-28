@@ -1,32 +1,32 @@
 import {
   addEnvironmentStateExpiryCheckListener,
   clearEnvironmentStateExpiryCheckListener,
-} from "./environment-state";
-import { addPersonStateExpiryCheckListener, clearPersonStateExpiryCheckListener } from "./person-state";
+} from "@/lib/environment/state";
+import { addUserStateExpiryCheckListener, clearUserStateExpiryCheckListener } from "@/lib/user/state";
 
 let areRemoveEventListenersAdded = false;
 
 export const addEventListeners = (): void => {
   addEnvironmentStateExpiryCheckListener();
-  addPersonStateExpiryCheckListener();
+  addUserStateExpiryCheckListener();
 };
 
 export const addCleanupEventListeners = (): void => {
   if (areRemoveEventListenersAdded) return;
   clearEnvironmentStateExpiryCheckListener();
-  clearPersonStateExpiryCheckListener();
+  clearUserStateExpiryCheckListener();
   areRemoveEventListenersAdded = true;
 };
 
 export const removeCleanupEventListeners = (): void => {
   if (!areRemoveEventListenersAdded) return;
   clearEnvironmentStateExpiryCheckListener();
-  clearPersonStateExpiryCheckListener();
+  clearUserStateExpiryCheckListener();
   areRemoveEventListenersAdded = false;
 };
 
 export const removeAllEventListeners = (): void => {
   clearEnvironmentStateExpiryCheckListener();
-  clearPersonStateExpiryCheckListener();
+  clearUserStateExpiryCheckListener();
   removeCleanupEventListeners();
 };

@@ -4,19 +4,17 @@ import React, { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import { FormbricksAPI } from "@formbricks/api";
-import { ResponseQueue } from "@formbricks/lib/responseQueue";
-import { SurveyState } from "@formbricks/lib/surveyState";
-import { getStyling } from "@formbricks/lib/utils/styling";
-import type { SurveyInlineProps } from "@formbricks/types/formbricks-surveys";
-import { ZJsRNWebViewOnMessageData } from "@formbricks/types/js";
-import type { TJsEnvironmentStateSurvey, TJsFileUploadParams, TJsPersonState } from "@formbricks/types/js";
-import type { TResponseUpdate } from "@formbricks/types/responses";
-import type { TUploadFileConfig } from "@formbricks/types/storage";
-import { Logger } from "../../js-core/src/lib/logger";
-import { filterSurveys, getDefaultLanguageCode, getLanguageCode } from "../../js-core/src/lib/utils";
-import { RNConfig } from "./lib/config";
-import { StorageAPI } from "./lib/storage";
-import { SurveyStore } from "./lib/survey-store";
+import { RNConfig } from "@/lib/common/config";
+import { StorageAPI } from "@/lib/common/file-upload";
+import { Logger } from "@/lib/common/logger";
+import { ResponseQueue } from "@/lib/common/response-queue";
+import { filterSurveys, getDefaultLanguageCode, getLanguageCode, getStyling } from "@/lib/common/utils";
+import { SurveyState } from "@/lib/survey/state";
+import { SurveyStore } from "@/lib/survey/store";
+import { type TEnvironmentStateSurvey, type TUserState, ZJsRNWebViewOnMessageData } from "@/types/config";
+import type { TResponseUpdate } from "@/types/response";
+import type { TFileUploadParams, TUploadFileConfig } from "@/types/storage";
+import type { SurveyInlineProps } from "@/types/survey";
 
 const appConfig = RNConfig.getInstance();
 const logger = Logger.getInstance();
@@ -25,7 +23,7 @@ logger.configure({ logLevel: "debug" });
 const surveyStore = SurveyStore.getInstance();
 
 interface SurveyWebViewProps {
-  survey: TJsEnvironmentStateSurvey;
+  survey: TEnvironmentStateSurvey;
 }
 
 export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | undefined {
@@ -33,22 +31,23 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
   const [isSurveyRunning, setIsSurveyRunning] = useState(false);
   const [showSurvey, setShowSurvey] = useState(false);
 
-  const project = appConfig.get().environmentState.data.project;
-  const attributes = appConfig.get().attributes;
+  const project = appConfig.get().environment.data.project;
+  const language = appConfig.get().user.data.language;
 
   const styling = getStyling(project, survey);
   const isBrandingEnabled = project.inAppSurveyBranding;
   const isMultiLanguageSurvey = survey.languages.length > 1;
+  const [languageCode, setLanguageCode] = useState("default");
 
   const [surveyState, setSurveyState] = useState(
-    new SurveyState(survey.id, null, null, appConfig.get().personState.data.userId)
+    new SurveyState(survey.id, null, null, appConfig.get().user.data.userId)
   );
 
   const responseQueue = useMemo(
     () =>
       new ResponseQueue(
         {
-          apiHost: appConfig.get().apiHost,
+          appUrl: appConfig.get().appUrl,
           environmentId: appConfig.get().environmentId,
           retryAttempts: 2,
           setSurveyState,
@@ -59,7 +58,30 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
   );
 
   useEffect(() => {
-    if (!isSurveyRunning && survey.delay) {
+    if (isMultiLanguageSurvey) {
+      const displayLanguage = getLanguageCode(survey, language);
+      if (!displayLanguage) {
+        logger.debug(`Survey "${survey.name}" is not available in specified language.`);
+        setIsSurveyRunning(false);
+        setShowSurvey(false);
+        surveyStore.resetSurvey();
+        return;
+      }
+      setLanguageCode(displayLanguage);
+      setIsSurveyRunning(true);
+    } else {
+      setIsSurveyRunning(true);
+    }
+  }, [isMultiLanguageSurvey, language, survey]);
+
+  useEffect(() => {
+    if (!isSurveyRunning) {
+      setShowSurvey(false);
+      return;
+    }
+
+    if (survey.delay) {
+      logger.debug(`Delaying survey "${survey.name}" by ${String(survey.delay)} seconds`);
       const timerId = setTimeout(() => {
         setShowSurvey(true);
       }, survey.delay * 1000);
@@ -67,26 +89,13 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
       return () => {
         clearTimeout(timerId);
       };
-    } else if (!survey.delay) {
-      setShowSurvey(true);
     }
-  }, [survey.delay, isSurveyRunning]);
 
-  let languageCode = "default";
-
-  if (isMultiLanguageSurvey) {
-    const displayLanguage = getLanguageCode(survey, attributes);
-    //if survey is not available in selected language, survey wont be shown
-    if (!displayLanguage) {
-      logger.debug(`Survey "${survey.name}" is not available in specified language.`);
-      setIsSurveyRunning(true);
-      return;
-    }
-    languageCode = displayLanguage;
-  }
+    setShowSurvey(true);
+  }, [survey.delay, isSurveyRunning, survey.name]);
 
   const addResponseToQueue = (responseUpdate: TResponseUpdate): void => {
-    const { userId } = appConfig.get().personState.data;
+    const { userId } = appConfig.get().user.data;
     if (userId) surveyState.updateUserId(userId);
 
     responseQueue.updateSurveyState(surveyState);
@@ -101,13 +110,13 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
   };
 
   const onCloseSurvey = (): void => {
-    const { environmentState, personState } = appConfig.get();
+    const { environment: environmentState, user: personState } = appConfig.get();
     const filteredSurveys = filterSurveys(environmentState, personState);
 
     appConfig.update({
       ...appConfig.get(),
-      environmentState,
-      personState,
+      environment: environmentState,
+      user: personState,
       filteredSurveys,
     });
 
@@ -116,10 +125,10 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
   };
 
   const createDisplay = async (surveyId: string): Promise<{ id: string }> => {
-    const { userId } = appConfig.get().personState.data;
+    const { userId } = appConfig.get().user.data;
 
     const api = new FormbricksAPI({
-      apiHost: appConfig.get().apiHost,
+      apiHost: appConfig.get().appUrl,
       environmentId: appConfig.get().environmentId,
     });
 
@@ -135,21 +144,19 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
     return res.data;
   };
 
-  const uploadFile = async (
-    file: TJsFileUploadParams["file"],
-    params?: TUploadFileConfig
-  ): Promise<string> => {
-    const storage = new StorageAPI(appConfig.get().apiHost, appConfig.get().environmentId);
+  const uploadFile = async (file: TFileUploadParams["file"], params?: TUploadFileConfig): Promise<string> => {
+    const storage = new StorageAPI(appConfig.get().appUrl, appConfig.get().environmentId);
     return await storage.uploadFile(file, params);
   };
 
   return (
     <Modal
       animationType="slide"
-      visible={showSurvey ? !isSurveyRunning : undefined}
+      visible={showSurvey}
       transparent
       onRequestClose={() => {
         setShowSurvey(false);
+        setIsSurveyRunning(false);
       }}>
       <WebView
         ref={webViewRef}
@@ -160,7 +167,7 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
             isBrandingEnabled,
             styling,
             languageCode,
-            apiHost: appConfig.get().apiHost,
+            appUrl: appConfig.get().appUrl,
           }),
         }}
         style={{ backgroundColor: "transparent" }}
@@ -195,7 +202,7 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
               logger.error("Error parsing message from WebView.");
               return;
             }
-            // display
+
             const {
               onDisplay,
               onResponse,
@@ -211,27 +218,27 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
               const { id } = await createDisplay(survey.id);
               surveyState.updateDisplayId(id);
 
-              const existingDisplays = appConfig.get().personState.data.displays;
+              const existingDisplays = appConfig.get().user.data.displays;
               const newDisplay = { surveyId: survey.id, createdAt: new Date() };
 
               const displays = [...existingDisplays, newDisplay];
               const previousConfig = appConfig.get();
 
               const updatedPersonState = {
-                ...previousConfig.personState,
+                ...previousConfig.user,
                 data: {
-                  ...previousConfig.personState.data,
+                  ...previousConfig.user.data,
                   displays,
                   lastDisplayAt: new Date(),
                 },
               };
 
-              const filteredSurveys = filterSurveys(previousConfig.environmentState, updatedPersonState);
+              const filteredSurveys = filterSurveys(previousConfig.environment, updatedPersonState);
 
               appConfig.update({
                 ...previousConfig,
-                environmentState: previousConfig.environmentState,
-                personState: updatedPersonState,
+                environment: previousConfig.environment,
+                user: updatedPersonState,
                 filteredSurveys,
               });
             }
@@ -241,21 +248,21 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
               const isNewResponse = surveyState.responseId === null;
 
               if (isNewResponse) {
-                const responses = appConfig.get().personState.data.responses;
-                const newPersonState: TJsPersonState = {
-                  ...appConfig.get().personState,
+                const responses = appConfig.get().user.data.responses;
+                const newPersonState: TUserState = {
+                  ...appConfig.get().user,
                   data: {
-                    ...appConfig.get().personState.data,
+                    ...appConfig.get().user.data,
                     responses: [...responses, surveyState.surveyId],
                   },
                 };
 
-                const filteredSurveys = filterSurveys(appConfig.get().environmentState, newPersonState);
+                const filteredSurveys = filterSurveys(appConfig.get().environment, newPersonState);
 
                 appConfig.update({
                   ...appConfig.get(),
-                  environmentState: appConfig.get().environmentState,
-                  personState: newPersonState,
+                  environment: appConfig.get().environment,
+                  user: newPersonState,
                   filteredSurveys,
                 });
               }
@@ -279,7 +286,7 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
               const fileDataUri = fileUploadParams.file.base64;
 
               if (fileDataUri) {
-                const file: TJsFileUploadParams["file"] = {
+                const file: TFileUploadParams["file"] = {
                   // uri: Platform.OS === "android" ? `data:${fileType};base64,${base64Data}` : base64Data,
                   base64: fileUploadParams.file.base64,
                   type: fileType,
@@ -324,7 +331,7 @@ export function SurveyWebView({ survey }: SurveyWebViewProps): JSX.Element | und
   );
 }
 
-const renderHtml = (options: Partial<SurveyInlineProps> & { apiHost?: string }): string => {
+const renderHtml = (options: Partial<SurveyInlineProps> & { appUrl?: string }): string => {
   return `
   <!doctype html>
   <html>
@@ -422,7 +429,7 @@ const renderHtml = (options: Partial<SurveyInlineProps> & { apiHost?: string }):
       }
 
       const script = document.createElement("script");
-      script.src = "${options.apiHost ?? "http://localhost:3000"}/js/surveys.umd.cjs";
+      script.src = "${options.appUrl ?? "http://localhost:3000"}/js/surveys.umd.cjs";
       script.async = true;
       script.onload = () => loadSurvey();
       script.onerror = (error) => {

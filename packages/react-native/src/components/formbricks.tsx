@@ -1,26 +1,25 @@
 import React, { useCallback, useEffect, useSyncExternalStore } from "react";
-import { type TJsConfigInput } from "@formbricks/types/js";
-import { Logger } from "../../js-core/src/lib/logger";
-import { init } from "./lib";
-import { SurveyStore } from "./lib/survey-store";
-import { SurveyWebView } from "./survey-web-view";
+import { SurveyWebView } from "@/components/survey-web-view";
+import { init } from "@/lib/common/initialize";
+import { Logger } from "@/lib/common/logger";
+import { SurveyStore } from "@/lib/survey/store";
 
 interface FormbricksProps {
-  initConfig: TJsConfigInput;
+  appUrl: string;
+  environmentId: string;
 }
+
 const surveyStore = SurveyStore.getInstance();
 const logger = Logger.getInstance();
 
-export function Formbricks({ initConfig }: FormbricksProps): React.JSX.Element | null {
+export function Formbricks({ appUrl, environmentId }: FormbricksProps): React.JSX.Element | null {
   // initializes sdk
   useEffect(() => {
     const initialize = async (): Promise<void> => {
       try {
         await init({
-          environmentId: initConfig.environmentId,
-          apiHost: initConfig.apiHost,
-          userId: initConfig.userId,
-          attributes: initConfig.attributes,
+          environmentId,
+          appUrl,
         });
       } catch {
         logger.debug("Initialization failed");
@@ -30,7 +29,7 @@ export function Formbricks({ initConfig }: FormbricksProps): React.JSX.Element |
     initialize().catch(() => {
       logger.debug("Initialization error");
     });
-  }, [initConfig]);
+  }, [environmentId, appUrl]);
 
   const subscribe = useCallback((callback: () => void) => {
     const unsubscribe = surveyStore.subscribe(callback);

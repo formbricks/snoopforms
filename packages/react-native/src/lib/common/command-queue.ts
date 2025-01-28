@@ -1,6 +1,7 @@
-import { wrapThrowsAsync } from "@formbricks/types/error-handlers";
-import { ErrorHandler, type Result } from "../../../js-core/src/lib/errors";
-import { checkInitialized } from "./initialize";
+/* eslint-disable no-console -- we need to log global errors */
+import { checkInitialized } from "@/lib/common/initialize";
+import { wrapThrowsAsync } from "@/lib/common/utils";
+import type { Result } from "@/types/error";
 
 export class CommandQueue {
   private queue: {
@@ -36,7 +37,6 @@ export class CommandQueue {
   private async run(): Promise<void> {
     this.running = true;
     while (this.queue.length > 0) {
-      const errorHandler = ErrorHandler.getInstance();
       const currentItem = this.queue.shift();
 
       if (!currentItem) continue;
@@ -47,7 +47,6 @@ export class CommandQueue {
         const initResult = checkInitialized();
 
         if (!initResult.ok) {
-          errorHandler.handle(initResult.error);
           continue;
         }
       }
@@ -59,9 +58,9 @@ export class CommandQueue {
       const result = await wrapThrowsAsync(executeCommand)();
 
       if (!result.ok) {
-        errorHandler.handle(result.error);
+        console.error("🧱 Formbricks - Global error: ", result.error);
       } else if (!result.data.ok) {
-        errorHandler.handle(result.data.error);
+        console.error("🧱 Formbricks - Global error: ", result.data.error);
       }
     }
     this.running = false;

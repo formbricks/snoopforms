@@ -38,7 +38,7 @@ export const updateAttributes = async (
   userId: string,
   environmentId: string,
   contactAttributesParam: TContactAttributes
-): Promise<{ success: boolean; details?: Record<string, string> }> => {
+): Promise<{ success: boolean; messages?: string[] }> => {
   validateInputs(
     [contactId, ZId],
     [userId, ZString],
@@ -96,9 +96,9 @@ export const updateAttributes = async (
     }
   );
 
-  let details: Record<string, string> = emailExists
-    ? { email: "The email already exists for this environment and was not updated." }
-    : {};
+  let messages: string[] = emailExists
+    ? ["The email already exists for this environment and was not updated."]
+    : [];
 
   // First, update all existing attributes
   if (existingAttributes.length > 0) {
@@ -122,9 +122,9 @@ export const updateAttributes = async (
     );
 
     // Revalidate cache for existing attributes
-    existingAttributes.map(({ key }) =>
-      contactAttributeCache.revalidate({ environmentId, contactId, userId, key })
-    );
+    for (const attribute of existingAttributes) {
+      contactAttributeCache.revalidate({ environmentId, contactId, userId, key: attribute.key });
+    }
   }
 
   // Then, try to create new attributes if any exist
@@ -133,10 +133,9 @@ export const updateAttributes = async (
 
     if (totalAttributeClassesLength > MAX_ATTRIBUTE_CLASSES_PER_ENVIRONMENT) {
       // Add warning to details about skipped attributes
-      details = {
-        ...details,
-        newAttributes: `Could not create ${newAttributes.length} new attribute(s) as it would exceed the maximum limit of ${MAX_ATTRIBUTE_CLASSES_PER_ENVIRONMENT} attribute classes. Existing attributes were updated successfully.`,
-      };
+      messages.push(
+        `Could not create ${newAttributes.length} new attribute(s) as it would exceed the maximum limit of ${MAX_ATTRIBUTE_CLASSES_PER_ENVIRONMENT} attribute classes. Existing attributes were updated successfully.`
+      );
     } else {
       // Create new attributes since we're under the limit
       await prisma.$transaction(
@@ -155,16 +154,17 @@ export const updateAttributes = async (
       );
 
       // Batch revalidate caches for new attributes
-      newAttributes.forEach(({ key }) => {
-        contactAttributeKeyCache.revalidate({ environmentId, key });
-        contactAttributeCache.revalidate({ environmentId, contactId, userId, key });
-      });
+      for (const attribute of newAttributes) {
+        contactAttributeKeyCache.revalidate({ environmentId, key: attribute.key });
+        contactAttributeCache.revalidate({ environmentId, contactId, userId, key: attribute.key });
+      }
+
       contactAttributeKeyCache.revalidate({ environmentId });
     }
   }
 
   return {
     success: true,
-    ...(Object.keys(details).length > 0 ? { details } : {}),
+    messages,
   };
 };
