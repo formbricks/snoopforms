@@ -12,6 +12,7 @@ import {
   isClientSideApiRoute,
   isForgotPasswordRoute,
   isLoginRoute,
+  isManagementApiRoute,
   isShareUrlRoute,
   isSignupRoute,
   isSyncWithUserIdentificationEndpoint,
@@ -24,7 +25,20 @@ import { NextResponse } from "next/server";
 import { RATE_LIMITING_DISABLED, WEBAPP_URL } from "@formbricks/lib/constants";
 import { isValidCallbackUrl } from "@formbricks/lib/utils/url";
 
+const isProduction = process.env.NODE_ENV === "production";
+
 export const middleware = async (request: NextRequest) => {
+  // Enforce HTTPS for management endpoints
+  if (isManagementApiRoute(request.nextUrl.pathname)) {
+    const forwardedProto = request.headers.get("x-forwarded-proto") || "http";
+    if (isProduction && forwardedProto !== "https") {
+      return NextResponse.json(
+        { error: "Only HTTPS connections are allowed on the management endpoint." },
+        { status: 403 }
+      );
+    }
+  }
+
   // issue with next auth types; let's review when new fixes are available
   const token = await getToken({ req: request as any });
 
@@ -40,7 +54,7 @@ export const middleware = async (request: NextRequest) => {
   if (token && callbackUrl) {
     return NextResponse.redirect(WEBAPP_URL + callbackUrl);
   }
-  if (process.env.NODE_ENV !== "production" || RATE_LIMITING_DISABLED) {
+  if (!isProduction || RATE_LIMITING_DISABLED) {
     return NextResponse.next();
   }
 
@@ -76,6 +90,7 @@ export const middleware = async (request: NextRequest) => {
       return NextResponse.json({ error: "Too many requests, Please try after a while!" }, { status: 429 });
     }
   }
+
   return NextResponse.next();
 };
 
@@ -94,5 +109,6 @@ export const config = {
     "/api/packages/:path*",
     "/auth/verification-requested",
     "/auth/forgot-password",
+    "/api/v1/management/:path*",
   ],
 };

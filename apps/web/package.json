@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "dotenv -e ../../.env -- vitest run",
-    "test:coverage": "dotenv -e ../../.env -- vitest run --coverage"
+    "test:coverage": "dotenv -e ../../.env -- vitest run --coverage",
+    "generate-api-specs": "tsx ./modules/api/openapi-document.ts > ../../docs/api-v2-reference/openapi.yml"
   },
   "dependencies": {
     "@ai-sdk/azure": "1.1.9",
@@ -63,6 +64,7 @@
     "@tailwindcss/forms": "0.5.9",
     "@tailwindcss/typography": "0.5.15",
     "@tanstack/react-table": "8.20.6",
+    "@unkey/ratelimit": "0.5.5",
     "@tolgee/cli": "2.8.1",
     "@tolgee/format-icu": "6.0.1",
     "@tolgee/react": "6.0.1",
@@ -123,7 +125,8 @@
     "ua-parser-js": "2.0.0",
     "webpack": "5.97.1",
     "xlsx": "0.18.5",
-    "zod": "3.24.1"
+    "zod": "3.24.1",
+    "zod-openapi": "4.2.3"
   },
   "devDependencies": {
     "@formbricks/config-typescript": "workspace:*",
